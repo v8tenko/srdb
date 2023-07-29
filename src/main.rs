@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-struct Node<T: PartialOrd + Clone + Debug> {
+struct Node<T: PartialOrd + Clone> {
     leaf: bool,
     count: usize,
     keys: Vec<T>,
@@ -11,7 +11,7 @@ struct Node<T: PartialOrd + Clone + Debug> {
 }
 
 #[allow(dead_code)]
-impl<T: PartialOrd + Clone + Debug> Node<T> {
+impl<T: PartialOrd + Clone> Node<T> {
     fn empty(t: usize) -> Self {
         return Node {
             keys: Vec::with_capacity(t),
@@ -188,6 +188,82 @@ impl<T: PartialOrd + Clone + Debug> Node<T> {
     }
 
     /**
+     * merge target node with one sibling
+     * returns index of new leaf
+     */
+    fn merge(children: &mut Vec<Box<Node<T>>>, target: usize, delimeter_value: T) -> usize {
+        let mut siblings = Self::siblings(children, target);
+        let target_leaf = siblings.remove(1).unwrap();
+
+        let possible_left = siblings[0].as_mut();
+
+        if let Some(left) = possible_left {
+            left.keys.push(delimeter_value);
+            left.keys.append(&mut target_leaf.keys);
+
+            children.remove(target);
+
+            return target - 1;
+        }
+
+        let possible_right = siblings[1].as_mut();
+
+        if let Some(right) = possible_right {
+            target_leaf.keys.push(delimeter_value);
+            target_leaf.keys.append(&mut right.keys);
+
+            children.remove(target + 1);
+
+            return target
+        }
+
+        panic!("Unable to merge index: {}", target)
+    }
+
+    fn delete(&mut self, value: T) -> bool {
+        let mut i = 0;
+
+        while i < self.count && value > self.keys[i] {
+            i += 1;
+        }
+
+        if i == self.count || self.keys[i] != value {
+            let max_value = self.keys[i - 1].clone();
+            let target_leaf = &mut self.children[i];
+
+            if target_leaf.leaf {
+                return self.delete_from_leaf(value, i)
+            }
+
+            let operation_status = target_leaf.delete(value);
+
+            if target_leaf.count < self.t {
+                Self::merge(&mut self.children, i, max_value);
+            }
+
+            return operation_status
+        }
+
+        let moved_to_node = &mut self.children[i + 1];
+
+        self.keys[i] = moved_to_node.keys.remove(0);
+        moved_to_node.keys.insert(0, value.clone());
+
+        if moved_to_node.leaf {
+            return self.delete_from_leaf(value, i + 1)
+        }
+
+        let operation_status = moved_to_node.delete(value);
+        let delimeter_value = self.keys[i].clone();
+
+        if moved_to_node.count < self.t {
+            Self::merge(&mut self.children, i, delimeter_value);
+        }
+
+        operation_status
+    }
+
+    /**
      * self refers to root of leaf
      * i is index of child, where we want to remove value
      * returns status of operation: did element remove
@@ -228,16 +304,23 @@ impl<T: PartialOrd + Clone + Debug> Node<T> {
             }
         }
 
+        let new_leaf_index = Self::merge(&mut self.children, i, self.keys[i].clone());
+        let status = self.children[new_leaf_index].remove_key(value);
+
+        if !status {
+            return false
+        }
+
         true
     }
 }
 
-struct BTree<T: PartialOrd + Clone + Debug> {
+struct BTree<T: PartialOrd + Clone> {
     root: Box<Node<T>>,
     t: usize,
 }
 
-impl<T: PartialOrd + Clone + Debug> BTree<T> {
+impl<T: PartialOrd + Clone> BTree<T> {
     pub fn new(t: usize) -> BTree<T> {
         let tree = BTree {
             root: Box::new(Node::<T>::leaf(t)),
@@ -270,6 +353,13 @@ impl<T: PartialOrd + Clone + Debug> BTree<T> {
         self.root.insert_nonfull(value)
     }
 
+    fn delete(&mut self, value: T) -> bool {
+        if self.root.leaf {
+            return self.root.remove_key(value);
+        }
+        return self.root.delete(value);
+    }
+
     fn to_vec(&self) -> Vec<T> {
         return self.root.to_vec();
     }
@@ -281,11 +371,13 @@ impl<T: PartialOrd + Clone + Debug> BTree<T> {
 fn main() {
     let mut tree = BTree::<i32>::new(3);
 
-    let arr: Vec<i32> = vec![1, 2, 3, -1, 2, 100, -1, 0, 6, 3, -10, 0, 234, -112];
+    let arr: Vec<i32> = vec![1, 2, -1, 2, 5, 100, -10, 0, 124, 4];
 
     for v in arr.iter() {
         tree.insert(*v)
     }
 
-    println!("{:?}", tree.contains(1000));
+    tree.delete(1);
+
+    println!("{:?}", tree.root);
 }
